@@ -2749,7 +2749,7 @@ GRANT SELECT ON table_name TO user_name WITH GRANT OPTION;
    \z table_name
    ```
 
-# 28.Exxtension
+# 28.Extension
 
 ### **مفهوم Extensions در پستگرس**
 
@@ -3091,3 +3091,619 @@ CREATE EXTENSION postgis;
 ---
 ## نکته :
 +  `برای هر دیتابیس باید اکتنشن راجداگانه نصب کنیم یا ان اکستنشن را در template1 ست کنیم `
+
+
+# 29. pgAgent (Extension)  
+
+پیجی ایجنت یک ابزار زمان‌بندی وظایف (Job Scheduler) برای PostgreSQL است که به کاربران اجازه می‌دهد وظایفی مانند اجرای پرس‌وجوها، اسکریپت‌ها یا فرآیندهای خارجی را در زمان‌های مشخص یا به صورت دوره‌ای اجرا کنند. این ابزار مشابه سرویس **cron** در سیستم‌های لینوکس است، اما به طور خاص برای PostgreSQL طراحی شده است.
+
+---
+
+### نصب pgAgent
+#### ۱. نصب بسته نرم‌افزاری
+بر اساس سیستم‌عامل، دستورات زیر را اجرا کنید:
+
+- **Ubuntu/Debian**:
+  ```bash
+  sudo apt-get install pgagent
+  ```
+
+- **RHEL/CentOS**:
+  ```bash
+  sudo yum install pgagent
+  ```
+
+- **نصب از طریق سورس**:  
+  اگر بسته موجود نیست، سورس کد را از [GitHub pgAgent](https://github.com/pgagent/pgagent) دریافت کرده و با دستورات زیر کامپایل کنید:
+  ```bash
+  git clone https://github.com/pgagent/pgagent.git
+  cd pgagent
+  mkdir build && cd build
+  cmake ..
+  make
+  sudo make install
+  ```
+
+#### ۲. فعال‌سازی اکستنشن در دیتابیس
+پس از نصب، باید اکستنشن `pgagent` را در دیتابیس موردنظر فعال کنید:
+```sql
+CREATE EXTENSION pgagent;
+```
+
+#### ۳. ایجاد جداول سیستمی
+اگر اکستنشن به درستی نصب شده باشد، جداول سیستمی مانند `pga_job`, `pga_schedule` و ... در دیتابیس ایجاد می‌شوند. برای بررسی این موضوع، دستور زیر را در `psql` اجرا کنید:
+```sql
+\dt pgagent.*
+```
+
+---
+
+### افزودن pgAgent به دیتابیس و تأیید نصب
+#### ۱. ایجاد کاربر اختصاصی (اختیاری)
+برای امنیت بیشتر، یک کاربر اختصاصی برای pgAgent ایجاد کنید:
+```sql
+CREATE USER pgagent_user WITH PASSWORD 'your_password';
+GRANT USAGE ON SCHEMA pgagent TO pgagent_user;
+GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA pgagent TO pgagent_user;
+```
+
+#### ۲. تأیید نصب
+- **بررسی وجود اکستنشن**:
+  ```sql
+  SELECT * FROM pg_extension WHERE extname = 'pgagent';
+  ```
+- **بررسی جداول سیستمی**:
+  ```sql
+  SELECT * FROM pgagent.pga_job;
+  ```
+
+---
+
+### سناریوهای استفاده و نحوه کاربرد
+#### ۱. ایجاد وظیفه (Job)
+وظایف در pgAgent شامل دو بخش **Step** (مراحل اجرا) و **Schedule** (زمان‌بندی) هستند.
+
+**مثال**: ایجاد یک وظیفه برای پشتیبان‌گیری روزانه:
+1. **Step**: اجرای دستور `pg_dump`:
+   ```sql
+   INSERT INTO pgagent.pga_jobstep (
+     jstjobid, jstname, jstkind, jstcode
+   ) VALUES (
+     1, 'Backup Step', 'b', 'pg_dump -U postgres mydb > /backups/mydb_backup.sql'
+   );
+   ```
+2. **Schedule**: تنظیم زمان‌بندی روزانه:
+   ```sql
+   INSERT INTO pgagent.pga_schedule (
+     jscjobid, jscname, jscdesc, jscminutes, jschours, jscweekdays
+   ) VALUES (
+     1, 'Daily Backup', 'Backup every day at 2 AM', '{0}', '{2}', '{0,1,2,3,4,5,6}'
+   );
+   ```
+
+#### ۲. سناریوهای متداول
+- **اجرای پرس‌وجوهای پاکسازی** (مثل حذف داده‌های قدیمی).
+- **همگام‌سازی داده‌ها بین دیتابیس‌ها**.
+- **ارسال گزارش‌های خودکار از طریق ایمیل**.
+
+---
+
+### تعامل با pgAgent در pgAdmin
+1. **فعال‌سازی واسط گرافیکی**:
+   - به pgAdmin بروید.
+   - در بخش **Tools**، **Query Tool** را انتخاب کنید.
+   - دستورات SQL مربوط به ایجاد وظایف را اجرا کنید.
+
+2. **ایجاد وظیفه با GUI** (در صورت پشتیبانی):
+   - به بخش **pgAgent Jobs** در درخت دیتابیس بروید.
+   - روی **Create Job** کلیک کرده و فیلدهای زیر را پر کنید:
+     - **Job Name**: نام وظیفه.
+     - **Steps**: مراحل اجرا (مثلاً اجرای SQL یا اسکریپت).
+     - **Schedules**: تنظیم زمان‌بندی.
+
+---
+
+### بررسی صحت راه‌اندازی
+1. **چک کردن لاگ‌ها**:
+   - لاگ‌های سیستمی را در `/var/log/pgagent.log` بررسی کنید.
+   - در دیتابیس، جدول `pgagent.pga_joblog` را بررسی کنید:
+     ```sql
+     SELECT * FROM pgagent.pga_joblog ORDER BY jlgid DESC LIMIT 10;
+     ```
+
+2. **اجرای دستی وظیفه**:
+   ```sql
+   SELECT pgagent.pga_jobagent('job_name');
+   ```
+
+3. **بررسی فرآیندهای فعال**:
+   ```bash
+   ps aux | grep pgagent
+   ```
+
+---
+
+### نکات مهم
+- **مجوزها**: مطمئن شوید کاربر pgAgent دسترسی لازم به دیتابیس و فایل‌سیستم دارد.
+- **سرویس pgAgent**: اگر از طریق سرویس سیستمی استفاده می‌کنید، آن را فعال کنید:
+  ```bash
+  sudo systemctl enable pgagent
+  sudo systemctl start pgagent
+  ```
+
+برای ایجاد یک **Job** در `pgAgent` با چندین مرحله (Step) و تنظیمات، از جداول سیستمی `pgagent` استفاده میکنیم. در ادامه، مراحل ایجاد یک Job نمونه را با مثال توضیح میدهیم.
+
+---
+
+## مثال: ایجاد یک Job با دو Step و یک Schedule
+
+>> میتوان از  طریق pgadmin بصورت گرافیکی آنرا ایجاد کرد .
+فرض کنید میخواهیم یک Job ایجاد کنیم که:
+1. **Step 1**: یک پرسوجوی SQL برای پاکسازی جدول `logs` اجرا کند.
+2. **Step 2**: یک اسکریپت خارجی (مثل پشتیبانگیری) را اجرا کند.
+3. **Schedule**: این Job هر روز ساعت ۲ بعدازظهر اجرا شود.
+
+---
+
+### ۱. ایجاد Job (وظیفه اصلی)
+ابتدا یک رکورد جدید در جدول `pga_job` ایجاد میکنیم:
+```sql
+INSERT INTO pgagent.pga_job (
+    jobname, 
+    jobdesc, 
+    jobhostagent, 
+    jobenabled
+) VALUES (
+    'Sample_Job', 
+    'پاکسازی لاگها و پشتیبانگیری روزانه', 
+    'localhost',  -- هاستی که Job روی آن اجرا میشود
+    true          -- فعالسازی Job
+);
+```
+
+---
+
+### ۲. افزودن Steps به Job
+هر Step در جدول `pga_jobstep` تعریف میشود. برای Job ایجادشده، دو Step اضافه میکنیم:
+
+#### Step 1: اجرای SQL برای پاکسازی جدول
+```sql
+INSERT INTO pgagent.pga_jobstep (
+    jstjobid,    -- شناسه Job (از pga_job.jobid)
+    jstname, 
+    jstkind,     -- نوع Step ('s'=SQL, 'b'=Batch)
+    jstcode,     -- کد یا دستور مربوط به Step
+    jstconnstr,  -- رشته اتصال به دیتابیس (اختیاری)
+    jstenabled
+) VALUES (
+    (SELECT jobid FROM pgagent.pga_job WHERE jobname = 'Sample_Job'),
+    'Cleanup_Logs_Step',
+    's',  -- نوع SQL
+    'DELETE FROM logs WHERE created_at < NOW() - INTERVAL ''7 days'';',
+    'host=localhost dbname=mydb user=postgres password=secret',
+    true
+);
+```
+
+#### Step 2: اجرای اسکریپت خارجی (Backup)
+```sql
+INSERT INTO pgagent.pga_jobstep (
+    jstjobid,
+    jstname,
+    jstkind,
+    jstcode,
+    jstconnstr,
+    jstenabled
+) VALUES (
+    (SELECT jobid FROM pgagent.pga_job WHERE jobname = 'Sample_Job'),
+    'Backup_Step',
+    'b',  -- نوع Batch (اجرای اسکریپت خارجی)
+    '/usr/bin/pg_dump -U postgres mydb > /backups/mydb_backup.sql',
+    '',  -- اینجا نیازی به رشته اتصال نیست
+    true
+);
+```
+
+---
+
+### ۳. تنظیم Schedule (زمانبندی)
+برای زمانبندی Job، یک رکورد در جدول `pga_schedule` ایجاد میکنیم:
+```sql
+INSERT INTO pgagent.pga_schedule (
+    jscjobid,
+    jscname,
+    jscdesc,
+    jscenabled,
+    jscstart,
+    jscminutes,  -- دقایق (مثلاً [0] معنای همه دقایق)
+    jschours,    -- ساعات (مثلاً [2] معنای 2 بعدازظهر)
+    jscweekdays  -- روزهای هفته (0=یکشنبه تا 6=شنبه)
+) VALUES (
+    (SELECT jobid FROM pgagent.pga_job WHERE jobname = 'Sample_Job'),
+    'Daily_Schedule',
+    'اجرای روزانه در ساعت 2 بعدازظهر',
+    true,
+    CURRENT_TIMESTAMP,  -- زمان شروع
+    '{0}',              -- همه دقایق (0)
+    '{2}',              -- ساعت 2
+    '{0,1,2,3,4,5,6}'  -- همه روزهای هفته
+);
+```
+
+---
+
+### ۴. پارامترهای مهم در جداول
+#### جدول `pga_job`
+- `jobname`: نام منحصر به فرد Job.
+- `jobdesc`: توضیحات Job.
+- `jobhostagent`: هاستی که Job روی آن اجرا میشود (مثلاً `localhost`).
+- `jobenabled`: فعال یا غیرفعال بودن Job.
+
+#### جدول `pga_jobstep`
+- `jstkind`: نوع Step (`s`=SQL, `b`=Batch/اسکریپت خارجی).
+- `jstcode`: کد SQL یا دستور خارجی.
+- `jstconnstr`: رشته اتصال به دیتابیس (اگر Step از نوع SQL باشد).
+- `jstretry`: تعداد تلاش مجدد در صورت خطا.
+
+#### جدول `pga_schedule`
+- `jscminutes`: آرایهای از دقایق (مثلاً `{0,15,30,45}` برای هر ۱۵ دقیقه).
+- `jschours`: آرایهای از ساعات.
+- `jscweekdays`: آرایهای از روزهای هفته (0 تا 6).
+
+---
+
+### ۵. بررسی اجرای Job
+- **لاگها**: از جدول `pga_joblog` برای بررسی اجرای موفق یا شکسته شدن Job استفاده کنید:
+  ```sql
+  SELECT * FROM pgagent.pga_joblog WHERE jlgjobid = (SELECT jobid FROM pgagent.pga_job WHERE jobname = 'Sample_Job');
+  ```
+
+- **اجرای دستی**: برای تست Job به صورت دستی، از دستور زیر استفاده کنید:
+  ```sql
+  SELECT pgagent.pga_jobagent('Sample_Job');
+  ```
+
+---
+
+### نکات مهم
+1. **دسترسیهای کاربر**: مطمئن شوید کاربر `pgagent` یا کاربر موردنظر، دسترسی لازم به دیتابیسها و فایلها را دارد.
+2. **امنیت**: از رشتههای اتصال (`jstconnstr`) با پسورد ساده خودداری کنید و از روش‌های امن مثل `pgpass` استفاده کنید.
+3. **خطاها**: اگر Job اجرا نمیشود، لاگهای سیستم (`/var/log/pgagent.log`) را بررسی کنید.
+
+# 30. PlPython (Extension)
+
+### مستندات استفاده از **PL/Python3** در PostgreSQL  
+**PL/Python3** یک زبان پروسجرال (Procedural Language) برای PostgreSQL است که به شما امکان می‌دهد توابع و پروسیجرهای پایگاه داده را با استفاده از زبان برنامه‌نویسی **Python 3** بنویسید. این امکان به ویژه برای پردازش داده‌های پیچیده، استفاده از کتابخانه‌های پایتون (مانند `NumPy`, `Pandas`) و اجرای منطق تجاری پیشرفته مفید است.
+
+### بررسی اطلاعات در مورد این اکستنشن:
+
+
+```bash
+sudo apt search --names-only postgresql | greep python
+```
+output:
+
+      postgresql-plpython3-14/jammy-updates,jammy-security 14.17-0ubuntu0.22.04.1 amd64
+      python3-postgresql/jammy 1.2.1+git20180803.ef7b9a9-4build1 amd64
+      python3-testing.postgresql/jammy,jammy 1.3.0-2 all
+### ۱. نصب PL/Python3
+#### الف) نصب بسته نرم‌افزاری
+برای استفاده از PL/Python3، ابتدا باید بسته مربوطه را نصب کنید:
+
+- **Ubuntu/Debian**:
+  ```bash
+  sudo apt-get install postgresql-plpython3-<version>
+  sudo apt install -y postgresql-plpython3-14
+  ```
+  (جایگزینی `<version>` با شماره نسخه PostgreSQL، مثلاً `14` برای PostgreSQL 14)
+
+- **نصب از سورس**:  
+
+  اگر PostgreSQL را از سورس کامپایل کرده‌اید، PL/Python3 را با فعال کردن آن در زمان کامپایل (`--with-python`) نصب کنید.
+
+---
+
+#### ب) فعال‌سازی PL/Python3 در دیتابیس
+پس از نصب، زبان `plpython3u` را در دیتابیس موردنظر فعال کنید:
+```sql
+CREATE EXTENSION plpython3u;
+```
+
+**توضیح**:  
+- `plpython3u` نسخه **Untrusted** PL/Python3 است که به کدهای پایتون اجازه می‌دهد به منابع سیستمی دسترسی داشته باشند (نیاز به دسترسی `SUPERUSER` برای ایجاد توابع).
+- برای استفاده از نسخه **Trusted** (محدودشده)، از `plpython3` استفاده کنید (اگر موجود باشد).
+
+**بررسی نصب**:  
+```sql
+SELECT * FROM pg_language WHERE lanname = 'plpython3u';
+```
+
+---
+
+### ۲. مثال‌های ساده
+#### مثال ۱: تابع ساده برای محاسبه فاکتوریل
+```sql
+CREATE OR REPLACE FUNCTION factorial(n INTEGER)
+RETURNS INTEGER
+AS $$
+  def fact(x):
+    if x == 0:
+      return 1
+    else:
+      return x * fact(x-1)
+  return fact(n)
+$$ LANGUAGE plpython3u;
+```
+**اجرای تابع**:
+```sql
+SELECT factorial(5);  -- خروجی: 120
+```
+
+#### مثال ۲: استفاده از کتابخانه‌های پایتون
+```sql
+CREATE OR REPLACE FUNCTION use_numpy(arr FLOAT[])
+RETURNS FLOAT[]
+AS $$
+  import numpy as np
+  np_array = np.array(arr)
+  return np_array * 2
+$$ LANGUAGE plpython3u;
+```
+**اجرای تابع**:
+```sql
+SELECT use_numpy(ARRAY[1.0, 2.0, 3.0]);  -- خروجی: {2.0,4.0,6.0}
+```
+
+---
+
+### ۳. پارامترها و تنظیمات
+#### الف) پارامترهای ورودی و خروجی
+- **ورودی**: می‌توانید از تمامی نوع‌های داده PostgreSQL (مانند `INTEGER`, `TEXT`, `ARRAY`) استفاده کنید.
+- **خروجی**: باید نوع داده خروجی را به درستی تعریف کنید (`RETURNS`).
+
+#### ب) دسترسی به داده‌های دیتابیس
+برای خواندن/نوشتن در جداول، از دستورات SQL درون کد پایتون استفاده کنید:
+```sql
+CREATE OR REPLACE FUNCTION get_employee_count()
+RETURNS INTEGER
+AS $$
+  rv = plpy.execute("SELECT COUNT(*) AS count FROM employees")
+  return rv[0]['count']
+$$ LANGUAGE plpython3u;
+```
+
+---
+
+### ۴. سناریوهای استفاده
+#### ۱. **پردازش داده‌های پیچیده**
+- مثال: استفاده از `Pandas` برای پاکسازی داده‌ها قبل از ذخیره در جدول:
+  ```sql
+  CREATE FUNCTION clean_data(raw_data TEXT)
+  RETURNS TEXT
+  AS $$
+    import pandas as pd
+    df = pd.read_json(raw_data)
+    # پردازش دادهها
+    return df.to_json()
+  $$ LANGUAGE plpython3u;
+  ```
+
+#### ۲. **اتصال به APIهای خارجی**
+- مثال: دریافت داده از یک API و ذخیره آن در جدول:
+  ```sql
+  CREATE FUNCTION fetch_weather(city TEXT)
+  RETURNS VOID
+  AS $$
+    import requests
+    response = requests.get(f"http://api.weatherapi.com/v1/current.json?key=YOUR_API_KEY&q={city}")
+    data = response.json()
+    plpy.execute(f"""
+      INSERT INTO weather (city, temp)
+      VALUES ('{city}', {data['current']['temp_c']})
+    """)
+  $$ LANGUAGE plpython3u;
+  ```
+
+#### ۳. **پیادهسازی منطق تجاری پیچیده**
+- مثال: محاسبه تخفیف بر اساس شرایط مختلف:
+  ```sql
+  CREATE FUNCTION calculate_discount(user_id INT, amount FLOAT)
+  RETURNS FLOAT
+  AS $$
+    # دریافت سابقه خرید کاربر
+    result = plpy.execute(f"SELECT total_purchases FROM users WHERE id = {user_id}")
+    total_purchases = result[0]['total_purchases']
+    
+    if total_purchases > 1000:
+      return amount * 0.2  # 20% تخفیف
+    elif total_purchases > 500:
+      return amount * 0.1  # 10% تخفیف
+    else:
+      return 0
+  $$ LANGUAGE plpython3u;
+  ```
+
+---
+
+### ۵. تعامل با pgAdmin
+1. **ایجاد تابع با GUI**:
+   - در pgAdmin، به بخش **Functions** در دیتابیس بروید.
+   - روی **Create Function** کلیک کنید.
+   - در قسمت **Language**، `plpython3u` را انتخاب کنید.
+   - کد پایتون را در بخش **Code** بنویسید.
+
+2. **اجرای تابع**:
+   - از تب **Query Tool** برای اجرای تابع استفاده کنید:
+     ```sql
+     SELECT your_function_name(parameters);
+     ```
+
+---
+
+### ۶. رفع اشکال و نکات مهم
+#### الف) خطاهای رایج
+- **خطای `language "plpython3u" does not exist`**:  
+  نشاندهنده عدم نصب یا فعال‌سازی PL/Python3 است. مراحل نصب را دوباره بررسی کنید.
+
+- **خطای `permission denied for language plpython3u`**:  
+  فقط کاربران `SUPERUSER` می‌توانند توابع `plpython3u` ایجاد کنند. دسترسی‌ها را بررسی کنید:
+  ```sql
+  GRANT USAGE ON LANGUAGE plpython3u TO your_user;
+  ```
+
+#### ب) لاگ‌گیری و دیباگ
+- برای دیدن خطاها، لاگ PostgreSQL را بررسی کنید:
+  ```bash
+  tail -f /var/log/postgresql/postgresql-<version>-main.log
+  ```
+
+#### ج) نسخه پایتون
+- مطمئن شوید که نسخه پایتون نصبشده با نسخه `plpython3u` سازگار است.  
+  (مثلاً برای PostgreSQL 14، پایتون 3.9 یا بالاتر نیاز است).
+
+---
+
+### ۷. نکات امنیتی
+- **استفاده از `plpython3u`**: این نسخه به کدهای پایتون اجازه دسترسی به فایل‌سیستم و شبکه می‌دهد. **فقط به کاربران مورد اعتماد دسترسی دهید**.
+- **محدودکردن دسترسی**:  
+  ```sql
+  REVOKE USAGE ON LANGUAGE plpython3u FROM PUBLIC;
+  ```
+
+---
+
+با استفاده از PL/Python3، می‌توانید توانایی‌های PostgreSQL را با سادگی و قدرت پایتون ترکیب کنید. این ابزار برای پروژه‌های داده‌کاوی، یادگیری ماشینی و پردازش دسته‌ای بسیار کاربردی است.
+
+# 31. DVD Rental (DataBase Sample)
+
+
+
+
+### ۱. **دانلود دیتاست DVD Rental**
+**پیشنهاد میشود از منبع معتبر [PostgreSQL Tutorial](https://www.postgresqltutorial.com/postgresql-getting-started/load-postgresql-sample-database/) استفاده کنید.**
+
+#### الف) دانلود فایل بکاپ:
+- لینک مستقیم دیتاست:  
+  [https://www.postgresqltutorial.com/wp-content/uploads/2019/05/dvdrental.zip](https://www.postgresqltutorial.com/wp-content/uploads/2019/05/dvdrental.zip)
+
+#### ب) دانلود با `wget`:
+```bash
+wget https://www.postgresqltutorial.com/wp-content/uploads/2019/05/dvdrental.zip
+```
+
+---
+
+### ۲. **نصب وابستگیها**
+```bash
+sudo apt update
+sudo apt install postgresql postgresql-contrib unzip -y
+```
+
+---
+
+### ۳. **ایجاد دیتابیس و کاربر**
+**وارد شدن به حساب `postgres`**:
+```bash
+sudo -i -u postgres
+```
+
+**ایجاد کاربر و دیتابیس**:
+```sql
+CREATE USER dvd_user WITH PASSWORD 'your_secure_password';
+-- ایجاد کاربر جدید (مثال: dvd_user)
+
+-- ایجاد دیتابیس
+CREATE DATABASE dvdrental OWNER dvd_user;
+
+-- اعطای مجوزها
+GRANT ALL PRIVILEGES ON DATABASE dvdrental TO dvd_user;
+```
+
+---
+
+### ۴. **استخراج فایل بکاپ**
+```bash
+unzip dvdrental.zip -d dvdrental
+```
+فایل `dvdrental.tar` در پوشه `dvdrental` ایجاد میشود.
+
+---
+
+### ۵. **بارگذاری دیتاست در PostgreSQL**
+#### الف) استفاده از `pg_restore`:
+```bash
+pg_restore -U dvd_user -d dvdrental -v dvdrental/dvdrental.tar
+```
+- `-U dvd_user`: نام کاربر.
+- `-d dvdrental`: نام دیتابیس.
+- `-v`: حالت ورایش (نمایش جزئیات عملیات).
+
+#### ب) اگر خطای **"permission denied"** مشاهده کردید:
+
+```bash
+sudo chown -R postgres:postgres AdventureWorks-for-Postgres
+```
+
+```bash
+sudo chmod 644 dvdrental/dvdrental.tar
+```
+
+---
+
+### ۶. **تنظیمات دسترسی (`pg_hba.conf`)**
+برای اجازه دسترسی به دیتابیس، فایل `pg_hba.conf` را ویرایش کنید:
+```bash
+sudo nano /etc/postgresql/14/main/pg_hba.conf
+```
+و خط زیر را اضافه کنید:
+```
+# TYPE  DATABASE     USER         ADDRESS       METHOD
+host    dvdrental    dvd_user     127.0.0.1/32  md5
+```
+سپس سرویس PostgreSQL را ریستارت کنید:
+```bash
+sudo systemctl restart postgresql
+```
+
+---
+
+### ۷. **بررسی دادهها**
+وارد دیتابیس شوید:
+```bash
+psql -U dvd_user -d dvdrental -h localhost
+```
+>> جابجای بین دیتابیس ها 
+
+  ```sql
+  \c dvdrental
+  ```
+
+**مثال کوئری**:
+```sql
+SELECT COUNT(*) FROM film;
+-- تعداد فیلمها
+
+-- ۵ فیلم برتر بر اساس طول مدت
+SELECT title, length FROM film ORDER BY length DESC LIMIT 5;
+```
+
+---
+
+### ۸. **نکات مهم**
+1. **مجوزها**:  
+   اگر جداول را نمیبینید، مجوزها را بررسی کنید:
+   ```sql
+   GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO dvd_user;
+   ```
+
+2. **امنیت**:  
+   - از روش `md5` یا `scram-sha-256` در `pg_hba.conf` برای احراز هویت استفاده کنید.
+   - مجوزهای غیرضروری را از کاربر `dvd_user` حذف کنید.
+
+3. **نسخه PostgreSQL**:  
+   دیتاست DVD Rental با PostgreSQL 10+ سازگار است. برای بررسی نسخه:
+   ```sql
+   SELECT version();
+   ```
+
+---
